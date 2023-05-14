@@ -321,6 +321,7 @@ func (l *raftLog) commitTo(tocommit uint64) {
 		if l.lastIndex() < tocommit {
 			l.logger.Panicf("tocommit(%d) is out of range [lastIndex(%d)]. Was the raft log corrupted, truncated, or lost?", tocommit, l.lastIndex())
 		}
+		l.logger.Infof("commited:%d commit to %d", l.committed, tocommit)
 		l.committed = tocommit
 	}
 }

@@ -548,6 +548,7 @@ func (r *raft) send(m pb.Message) {
 		r.msgsAfterAppend = append(r.msgsAfterAppend, m)
 	} else {
 		if m.To == r.id {
+			r.logger.Infof("%v %d -> %d", m.Type, m.To, r.id)
 			r.logger.Panicf("message should not be self-addressed when sending %s", m.Type)
 		}
 		r.msgs = append(r.msgs, m)
@@ -659,6 +660,7 @@ func (r *raft) bcastAppend() {
 		if id == r.id {
 			return
 		}
+		r.logger.Infof("bcastAppend %d->%d", r.id, id)
 		r.sendAppend(id)
 	})
 }
@@ -686,7 +688,7 @@ func (r *raft) appliedTo(index uint64, size entryEncodingSize) {
 	oldApplied := r.raftLog.applied
 	newApplied := max(index, oldApplied)
 	r.raftLog.appliedTo(newApplied, size)
-
+	r.logger.Infof("appliedTo index[%d]", index)
 	if r.prs.Config.AutoLeave && newApplied >= r.pendingConfIndex && r.state == StateLeader {
 		// If the current (and most recent, at least for this leader's term)
 		// configuration should be auto-left, initiate that now. We use a
@@ -703,6 +705,7 @@ func (r *raft) appliedTo(index uint64, size entryEncodingSize) {
 		// leadership transfer will succeed and the new leader will leave
 		// the joint configuration, or the leadership transfer will fail,
 		// and we will propose the config change on the next advance.
+		r.logger.Infof("confChangeToMsg")
 		if err := r.Step(m); err != nil {
 			r.logger.Debugf("not initiating automatic transition out of joint configuration %s: %v", r.prs.Config, err)
 		} else {
@@ -783,6 +786,7 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 	//  if r.maybeCommit() {
 	//  	r.bcastAppend()
 	//  }
+	r.logger.Infof("appendEntry index:%d", li)
 	r.send(pb.Message{To: r.id, Type: pb.MsgAppResp, Index: li})
 	return true
 }
@@ -1098,6 +1102,7 @@ func (r *raft) Step(m pb.Message) error {
 	case pb.MsgStorageApplyResp:
 		if len(m.Entries) > 0 {
 			index := m.Entries[len(m.Entries)-1].Index
+			r.logger.Infof("MsgStorageApplyResp")
 			r.appliedTo(index, entsSize(m.Entries))
 			r.reduceUncommittedSize(payloadsSize(m.Entries))
 		}
@@ -1164,6 +1169,9 @@ func (r *raft) Step(m pb.Message) error {
 type stepFunc func(r *raft, m pb.Message) error
 
 func stepLeader(r *raft, m pb.Message) error {
+	if m.Type != pb.MsgBeat && m.Type != pb.MsgHeartbeatResp {
+		r.logger.Infof("stepLeader:%v %d -> %d", m.Type, m.From, m.To)
+	}
 	// These message types do not require any progress for m.From.
 	switch m.Type {
 	case pb.MsgBeat:
@@ -1183,6 +1191,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		})
 		return nil
 	case pb.MsgProp:
+		r.logger.Infof("%v entries:%v", m.Type, m.Entries)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
@@ -1239,6 +1248,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		if !r.appendEntry(m.Entries...) {
 			return ErrProposalDropped
 		}
+		r.logger.Infof("bcastAppend")
 		r.bcastAppend()
 		return nil
 	case pb.MsgReadIndex:
@@ -1545,6 +1555,9 @@ func stepLeader(r *raft, m pb.Message) error {
 // stepCandidate is shared by StateCandidate and StatePreCandidate; the difference is
 // whether they respond to MsgVoteResp or MsgPreVoteResp.
 func stepCandidate(r *raft, m pb.Message) error {
+	if m.Type != pb.MsgBeat {
+		r.logger.Infof("stepCandidate:%v", m.Type)
+	}
 	// Only handle vote responses corresponding to our candidacy (while in
 	// StateCandidate, we may get stale MsgPreVoteResp messages in this term from
 	// our pre-candidate state).
@@ -1590,6 +1603,9 @@ func stepCandidate(r *raft, m pb.Message) error {
 }
 
 func stepFollower(r *raft, m pb.Message) error {
+	if m.Type != pb.MsgHeartbeat {
+		r.logger.Infof("stepFollower:%v", m.Type)
+	}
 	switch m.Type {
 	case pb.MsgProp:
 		if r.lead == None {
@@ -1644,6 +1660,22 @@ func stepFollower(r *raft, m pb.Message) error {
 }
 
 func (r *raft) handleAppendEntries(m pb.Message) {
+	r.logger.Infof("%v from:%d index[%d] commit[%d]", m.Type, m.From, m.Index, m.Commit)
+	// TODO test
+	for _, item := range m.Entries {
+		if strings.Contains(string(item.Data), "reject") {
+			r.logger.Infof("data:%v", string(item.Data))
+			r.send(pb.Message{
+				To:         m.From,
+				Type:       pb.MsgAppResp,
+				Index:      m.Index,
+				Reject:     true,
+				RejectHint: r.raftLog.lastIndex(),
+				LogTerm:    r.raftLog.lastTerm(),
+			})
+			return
+		}
+	}
 	if m.Index < r.raftLog.committed {
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 		return
@@ -1808,6 +1840,7 @@ func (r *raft) applyConfChange(cc pb.ConfChangeV2) pb.ConfState {
 		if cc.LeaveJoint() {
 			return changer.LeaveJoint()
 		} else if autoLeave, ok := cc.EnterJoint(); ok {
+			r.logger.Infof("EnterJoint")
 			return changer.EnterJoint(autoLeave, cc.Changes...)
 		}
 		return changer.Simple(cc.Changes...)
