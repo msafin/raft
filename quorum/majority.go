@@ -22,6 +22,7 @@ import (
 )
 
 // MajorityConfig is a set of IDs that uses majority quorums to make decisions.
+// key对应raft node id
 type MajorityConfig map[uint64]struct{}
 
 func (c MajorityConfig) String() string {
@@ -123,6 +124,7 @@ func insertionSort(sl []uint64) {
 
 // CommittedIndex computes the committed index from those supplied via the
 // provided AckedIndexer (for the active config).
+// AckedIndexer记录了每个vote id已经确认的CommittedIndex
 func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 	n := len(c)
 	if n == 0 {
@@ -138,6 +140,7 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 	// replication factor of >7 is rare, and in cases in which it happens
 	// performance is a lesser concern (additionally the performance
 	// implications of an allocation here are far from drastic).
+	// 确定是否需要动态创建数组，stk代表stack，srt代表？
 	var stk [7]uint64
 	var srt []uint64
 	if len(stk) >= n {
@@ -153,6 +156,7 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 		// the left after sorting below anyway).
 		i := n - 1
 		for id := range c {
+			// 将committed index记录在素组中，类似 [1,3,2,4,5,0,0]
 			if idx, ok := l.AckedIndex(id); ok {
 				srt[i] = uint64(idx)
 				i--
@@ -162,11 +166,14 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 
 	// Sort by index. Use a bespoke algorithm (copied from the stdlib's sort
 	// package) to keep srt on the stack.
+	// 对committed index排序
 	insertionSort(srt)
 
 	// The smallest index into the array for which the value is acked by a
 	// quorum. In other words, from the end of the slice, move n/2+1 to the
 	// left (accounting for zero-indexing).
+	// srt是从小到大排列的committed index，例如 [0,1,2,3,4,4,5]，那经过多数确认的
+	// committed index是多少？只需要从素组尾部开始往前挪n/2+1即可，也就是从头开始n-(n/2+1)
 	pos := n - (n/2 + 1)
 	return Index(srt[pos])
 }

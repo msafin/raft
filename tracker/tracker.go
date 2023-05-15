@@ -161,8 +161,10 @@ func (p *ProgressTracker) IsSingleton() bool {
 	return len(p.Voters[0]) == 1 && len(p.Voters[1]) == 0
 }
 
+// 记录每个vote id的同步进展
 type matchAckIndexer map[uint64]*Progress
 
+// 这里确保matchAckIndexer要实现AckedIndexer接口
 var _ quorum.AckedIndexer = matchAckIndexer(nil)
 
 // AckedIndex implements IndexLookuper.

@@ -27,6 +27,13 @@ import (
 // NB(tbg): Progress is basically a state machine whose transitions are mostly
 // strewn around `*raft.raft`. Additionally, some fields are only used when in a
 // certain State. All of this isn't ideal.
+// Progress 表示跟随者在领导者看来的进展。 领导者
+// 维护所有follower的进度，并将条目发送给follower
+// 基于它的进度。
+//
+// NB(tbg): Progress 基本上是一个状态机，其转换主要是
+// 散布在 `*raft.raft` 周围。 此外，某些字段仅在
+// 某个状态。 这一切都不理想。
 type Progress struct {
 	Match, Next uint64
 	// State defines how the leader should interact with the follower.
@@ -40,6 +47,14 @@ type Progress struct {
 	//
 	// When in StateSnapshot, leader should have sent out snapshot
 	// before and stops sending any replication message.
+	// 状态定义领导者应该如何与追随者互动。
+	//
+	// 在 StateProbe 中，leader 最多发送一条复制消息, 每个心跳间隔。 它还探测跟随者的实际进度。
+	//
+	// StateReplicate 时，leader 乐观增加 next 到发送复制消息后发送的最新条目。 这是
+	// 用于将日志条目快速复制到跟随者的优化状态。
+	//
+	// 当处于 StateSnapshot 时，leader 应该已经发送了 snapshot 之前并停止发送任何复制消息。
 	State StateType
 
 	// PendingSnapshot is used in StateSnapshot.

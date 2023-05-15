@@ -16,6 +16,8 @@ package quorum
 
 // JointConfig is a configuration of two groups of (possibly overlapping)
 // majority configurations. Decisions require the support of both majorities.
+// 联合配置，当成员同时变更数大于1的时候，会触发联合配置机制，JointConfig[0]包含最新配置，
+// JointConfig[1]包含旧配置
 type JointConfig [2]MajorityConfig
 
 func (c JointConfig) String() string {
@@ -46,6 +48,7 @@ func (c JointConfig) Describe(l AckedIndexer) string {
 // CommittedIndex returns the largest committed index for the given joint
 // quorum. An index is jointly committed if it is committed in both constituent
 // majorities.
+// 获取联合配置的CommittedIndex
 func (c JointConfig) CommittedIndex(l AckedIndexer) Index {
 	idx0 := c[0].CommittedIndex(l)
 	idx1 := c[1].CommittedIndex(l)
